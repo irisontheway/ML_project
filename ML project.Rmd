@@ -1,0 +1,96 @@
+---
+title: "Practical Machine Learning Project"
+author: "Iris Guan"
+output: html_document
+---
+## Project Goal
+
+The goal of this project is to predict the manner in which people did the exercise. 
+
+# Data Download and Preperation
+
+```{r dataprep, echo=TRUE, message=FALSE, warning=FALSE}
+        set.seed(1)
+        
+        library(mlbench)
+        library(caret)
+
+        download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",destfile = "./training.csv")
+        training <- read.csv("./training.csv", header=TRUE,na.strings=c("NA","#DIV/0!", ""))
+
+        download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile= "./testing.csv")
+        testing <- read.csv("./testing.csv", header=TRUE, na.strings=c("NA","#DIV/0!", ""))
+```
+#Remove features that don't help on prediction or show low vairance, from training data. Also remove features that have more than 80% NA values.
+
+```{r fct, echo=TRUE, message=FALSE, warning=FALSE}
+        FC <- grep("X|timestamp|name|window", colnames(training))
+        training <- training[,-FC]
+        nearzero <- nearZeroVar(training, saveMetrics = TRUE)
+        training <- training[, !nearzero$nzv]
+
+        Index80NA <- sapply(colnames(training), function(x) if(sum(is.na(training[, x])) > 0.80*nrow(training)) {return(TRUE)} else{return(FALSE)})
+        training <- training[, !Index80NA]
+
+        dim(training)
+```
+
+#Check correlation among remaining features
+
+```{r corcheck, echo=TRUE, message=FALSE, warning=FALSE}
+        correlationMatrix <- cor(training[,-53], use="pairwise.complete.obs") 
+        highlyCorrelated <- findCorrelation(correlationMatrix,cutoff=0.75)
+        names(training)[highlyCorrelated]
+```
+#We could see that many variables are correlated. We will apply PCA analysis to reduce feature dimension on subset of trainign data for cross validation. 
+#Cross Vadalidation Data Setup
+
+```{r cv, echo=TRUE, message=FALSE, warning=FALSE}
+        dataInx <- createDataPartition(training$classe, p=0.75, list=F)
+
+        Ttrain <- training[dataInx,]
+        Ttest <- training[-dataInx,]
+```
+
+#PCA Analysis on training subset
+
+```{r pca, echo=TRUE, message=FALSE, warning=FALSE}
+        pPCA <- preProcess(Ttrain, method="pca", thresh=0.75)
+        TrainData <- predict(pPCA, Ttrain)
+```
+
+#Random Forest
+
+```{r rf, echo=TRUE, message=FALSE, warning=FALSE}
+        library(randomForest)
+        NAclasseInx <- is.na(TrainData$classe)
+        TrainData <- TrainData[!NAclasseInx,]
+        RFModel <- randomForest(classe ~ ., data=TrainData, do.trace=F)
+        print(RFModel)
+```
+
+#Apply on test data for validation
+
+```{r tdcv, echo=TRUE, message=FALSE, warning=FALSE}
+        TestData <- predict(pPCA, Ttest)
+        TestDataRF <- predict(RFModel, TestData)
+        confusionMatrix(Ttest$classe,TestDataRF)$overall[["Accuracy"]]
+```
+
+#Apply on the 20 test cases available in the test data
+
+```{r tds, echo=TRUE, message=FALSE, warning=FALSE}
+        testing <- testing[,-FC]
+
+        Tnearzero <- nearZeroVar(testing, saveMetrics = TRUE)
+        testing <- testing[, !Tnearzero$nzv]
+
+        TIndex80NA <- sapply(colnames(testing), function(x) if(sum(is.na(testing[, x])) > 0.80*nrow(testing)) {return(TRUE)} else{return(FALSE)})
+        testing <- testing[, !TIndex80NA]
+
+        T20 <- predict(pPCA, testing)
+        testing$classe <- predict(RFModel, T20)
+        
+        testing$classe
+
+```
